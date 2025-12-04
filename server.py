@@ -211,7 +211,10 @@ def process_job(job_id: str, image: np.ndarray, params: dict):
 
             if 'glb' in requested:
                 glb_path = job_dir / 'mesh.glb'
-                save_glb(glb_path, vertices, faces, vertex_uvs, image, vertex_normals)
+                # save_glb expects normal_texture (image), not vertex_normals
+                normal_texture = (normal * [0.5, -0.5, -0.5] + 0.5).clip(0, 1) * 255 if normal is not None else None
+                normal_texture = normal_texture.astype(np.uint8) if normal_texture is not None else None
+                save_glb(glb_path, vertices, faces, vertex_uvs, image, normal_texture)
                 outputs['glb'] = str(glb_path)
 
             if 'ply' in requested:

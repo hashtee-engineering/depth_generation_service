@@ -16,9 +16,9 @@ from .tools import timeit
 
 
 def save_glb(
-    save_path: Union[str, os.PathLike], 
-    vertices: np.ndarray, 
-    faces: np.ndarray, 
+    save_path: Union[str, os.PathLike],
+    vertices: np.ndarray,
+    faces: np.ndarray,
     vertex_uvs: np.ndarray,
     color_texture: np.ndarray,
     normal_texture: np.ndarray = None,
@@ -27,17 +27,20 @@ def save_glb(
     import trimesh.visual
     from PIL import Image
 
+    material_kwargs = {
+        'baseColorTexture': Image.fromarray(color_texture),
+        'metallicFactor': 0.5,
+        'roughnessFactor': 1.0
+    }
+    if normal_texture is not None:
+        material_kwargs['normalTexture'] = Image.fromarray(normal_texture)
+
     trimesh.Trimesh(
-        vertices=vertices, 
-        faces=faces, 
+        vertices=vertices,
+        faces=faces,
         visual = trimesh.visual.texture.TextureVisuals(
-            uv=vertex_uvs, 
-            material=trimesh.visual.material.PBRMaterial(
-                baseColorTexture=Image.fromarray(color_texture),
-                normalTexture=Image.fromarray(normal_texture),
-                metallicFactor=0.5,
-                roughnessFactor=1.0
-            )
+            uv=vertex_uvs,
+            material=trimesh.visual.material.PBRMaterial(**material_kwargs)
         ),
         process=False
     ).export(save_path)
