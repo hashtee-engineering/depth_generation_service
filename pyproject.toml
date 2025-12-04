@@ -19,10 +19,16 @@ dependencies = [
     "numpy",
     "torch>=2.0.0",
     "torchvision",
-    "gradio",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
     "utils3d @ git+https://github.com/EasternJournalist/utils3d.git@c5daf6f6c244d251f252102d09e9b7bcef791a38"
 ]
+
 requires-python = ">=3.9"
+
+[project.optional-dependencies]
+gradio = ["gradio"]
 
 [project.urls]
 Homepage = "https://github.com/microsoft/MoGe"
