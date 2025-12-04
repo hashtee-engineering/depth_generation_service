@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoGe 3D Generation Test</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #333; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        label { display: block; margin-bottom: 5px; font-weight: 500; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px; }
+        button { background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .status { padding: 10px; border-radius: 4px; margin: 10px 0; }
+        .status.pending { background: #fff3cd; }
+        .status.processing { background: #cce5ff; }
+        .status.completed { background: #d4edda; }
+        .status.failed { background: #f8d7da; }
+        .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .result-item img { max-width: 100%; border-radius: 4px; }
+        .result-item a { display: inline-block; margin-top: 10px; color: #007bff; }
+        #preview { max-width: 400px; max-height: 300px; margin: 10px 0; }
+        .measure-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; }
+        .measure-inputs { display: flex; gap: 20px; }
+        .measure-inputs > div { flex: 1; }
+        #measureResult { font-size: 18px; font-weight: bold; color: #28a745; }
+    </style>
+</head>
+<body>
+    <h1>MoGe 3D Generation Test</h1>
+
+    <div class="card">
+        <label for="serverUrl">Server URL</label>
+        <input type="text" id="serverUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
+
+        <label for="imageInput">Upload Image</label>
+        <input type="file" id="imageInput" accept="image/*">
+        <img id="preview" style="display:none;">
+
+        <label for="maxSize">Max Size</label>
+        <input type="number" id="maxSize" value="800">
+
+        <label for="resolutionLevel">Resolution Level (0-9)</label>
+        <input type="number" id="resolutionLevel" value="9" min="0" max="9">
+
+        <label for="outputs">Outputs</label>
+        <select id="outputs" multiple size="4">
+            <option value="depth" selected>Depth Map</option>
+            <option value="normal" selected>Normal Map</option>
+            <option value="glb" selected>GLB Mesh</option>
+            <option value="ply" selected>PLY Pointcloud</option>
+        </select>
+
+        <button id="submitBtn" onclick="submitJob()">Generate 3D</button>
+    </div>
+
+    <div class="card" id="statusCard" style="display:none;">
+        <h3>Job Status</h3>
+        <div id="statusText" class="status"></div>
+        <div id="results" class="results"></div>
+
+        <div class="measure-section" id="measureSection" style="display:none;">
+            <h3>Measure Distance</h3>
+            <p>Enter pixel coordinates (x, y) of two points:</p>
+            <div class="measure-inputs">
+                <div>
+                    <label>Point 1</label>
+                    <input type="number" id="p1x" placeholder="x1" style="width:48%;display:inline-block;">
+                    <input type="number" id="p1y" placeholder="y1" style="width:48%;display:inline-block;">
+                </div>
+                <div>
+                    <label>Point 2</label>
+                    <input type="number" id="p2x" placeholder="x2" style="width:48%;display:inline-block;">
+                    <input type="number" id="p2y" placeholder="y2" style="width:48%;display:inline-block;">
+                </div>
+            </div>
+            <button onclick="measureDistance()">Measure</button>
+            <p id="measureResult"></p>
+        </div>
+    </div>
+
+    <script>
+        let currentJobId = null;
+        let pollInterval = null;
+
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const preview = document.getElementById('preview');
+                    preview.src = e.target.result;
+                    preview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        async function submitJob() {
+            const serverUrl = document.getElementById('serverUrl').value.replace(/\/$/, '');
+            const fileInput = document.getElementById('imageInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select an image');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('max_size', document.getElementById('maxSize').value);
+            formData.append('resolution_level', document.getElementById('resolutionLevel').value);
+
+            const outputsSelect = document.getElementById('outputs');
+            const selectedOutputs = Array.from(outputsSelect.selectedOptions).map(o => o.value).join(',');
+            formData.append('outputs', selectedOutputs);
+
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('statusCard').style.display = 'block';
+            document.getElementById('statusText').textContent = 'Submitting...';
+            document.getElementById('statusText').className = 'status pending';
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('measureSection').style.display = 'none';
+
+            try {
+                const response = await fetch(`${serverUrl}/generate`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                }
+
+                const data = await response.json();
+                currentJobId = data.job_id;
+                document.getElementById('statusText').textContent = `Job ID: ${currentJobId} - Status: ${data.status}`;
+
+                // Start polling
+                pollInterval = setInterval(() => pollJobStatus(serverUrl), 1000);
+
+            } catch (error) {
+                document.getElementById('statusText').textContent = `Error: ${error.message}`;
+                document.getElementById('statusText').className = 'status failed';
+                document.getElementById('submitBtn').disabled = false;
+            }
+        }
+
+        async function pollJobStatus(serverUrl) {
+            try {
+                const response = await fetch(`${serverUrl}/job/${currentJobId}`);
+                const data = await response.json();
+
+                document.getElementById('statusText').textContent = `Job ID: ${currentJobId} - Status: ${data.status}`;
+                document.getElementById('statusText').className = `status ${data.status}`;
+
+                if (data.status === 'completed') {
+                    clearInterval(pollInterval);
+                    document.getElementById('submitBtn').disabled = false;
+                    displayResults(serverUrl, data.outputs);
+                    document.getElementById('measureSection').style.display = 'block';
+                } else if (data.status === 'failed') {
+                    clearInterval(pollInterval);
+                    document.getElementById('submitBtn').disabled = false;
+                    document.getElementById('statusText').textContent += ` - Error: ${data.error}`;
+                }
+
+            } catch (error) {
+                console.error('Poll error:', error);
+            }
+        }
+
+        function displayResults(serverUrl, outputs) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+
+            if (outputs.depth) {
+                resultsDiv.innerHTML += `
+                    <div class="result-item">
+                        <h4>Depth Map</h4>
+                        <img src="${serverUrl}/download/${currentJobId}/depth.png" alt="Depth">
+                        <br><a href="${serverUrl}/download/${currentJobId}/depth.exr" download>Download EXR</a>
+                    </div>
+                `;
+            }
+
+            if (outputs.normal) {
+                resultsDiv.innerHTML += `
+                    <div class="result-item">
+                        <h4>Normal Map</h4>
+                        <img src="${serverUrl}/download/${currentJobId}/normal.png" alt="Normal">
+                    </div>
+                `;
+            }
+
+            if (outputs.glb) {
+                resultsDiv.innerHTML += `
+                    <div class="result-item">
+                        <h4>3D Mesh</h4>
+                        <a href="${serverUrl}/download/${currentJobId}/mesh.glb" download>Download GLB</a>
+                    </div>
+                `;
+            }
+
+            if (outputs.ply) {
+                resultsDiv.innerHTML += `
+                    <div class="result-item">
+                        <h4>Point Cloud</h4>
+                        <a href="${serverUrl}/download/${currentJobId}/pointcloud.ply" download>Download PLY</a>
+                    </div>
+                `;
+            }
+
+            if (outputs.fov) {
+                resultsDiv.innerHTML += `
+                    <div class="result-item">
+                        <h4>Camera FOV</h4>
+                        <p>Horizontal: ${outputs.fov.fov_x.toFixed(1)}°</p>
+                        <p>Vertical: ${outputs.fov.fov_y.toFixed(1)}°</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function measureDistance() {
+            const serverUrl = document.getElementById('serverUrl').value.replace(/\/$/, '');
+            const p1x = parseInt(document.getElementById('p1x').value);
+            const p1y = parseInt(document.getElementById('p1y').value);
+            const p2x = parseInt(document.getElementById('p2x').value);
+            const p2y = parseInt(document.getElementById('p2y').value);
+
+            if (isNaN(p1x) || isNaN(p1y) || isNaN(p2x) || isNaN(p2y)) {
+                alert('Please enter valid coordinates');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${serverUrl}/measure`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        job_id: currentJobId,
+                        point1: [p1x, p1y],
+                        point2: [p2x, p2y]
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                }
+
+                const data = await response.json();
+                document.getElementById('measureResult').textContent =
+                    `Distance: ${data.distance_meters.toFixed(3)} meters | ` +
+                    `P1 depth: ${data.point1_depth.toFixed(3)}m | ` +
+                    `P2 depth: ${data.point2_depth.toFixed(3)}m`;
+
+            } catch (error) {
+                document.getElementById('measureResult').textContent = `Error: ${error.message}`;
+                document.getElementById('measureResult').style.color = '#dc3545';
+            }
+        }
+    </script>
+</body>
+</html>
